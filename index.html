@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>経費登録（30秒）</title>
+<style>
+  body{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;background:#f4f6f8;margin:0}
+  .card{background:#fff;margin:12px;padding:16px;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+  .row{display:flex;gap:10px;align-items:center}
+  .row>*{flex:1}
+  h1{font-size:18px;margin:0 0 12px}
+  label{font-weight:650;display:block;margin-top:12px}
+  input,select,button,textarea{width:100%;padding:10px;margin-top:6px;font-size:14px;box-sizing:border-box}
+  textarea{min-height:120px;resize:vertical}
+  button{border:none;border-radius:10px}
+  .primary{background:#2563eb;color:#fff;font-size:16px;margin-top:16px}
+  .ghost{background:#e5e7eb}
+  .badge{display:inline-block;padding:6px 10px;border-radius:8px;font-size:13px;margin-top:8px}
+  .ok{background:#16a34a;color:#fff}
+  .warn{background:#facc15}
+  .danger{background:#dc2626;color:#fff}
+  .hidden{display:none}
+  .small{font-size:12px;color:#6b7280;margin-top:6px;line-height:1.45}
+  .relax{margin-top:16px;padding:12px;border-radius:10px;background:#f0f9ff;font-size:14px}
+  .topbar{display:flex;justify-content:space-between;gap:8px;align-items:center}
+  .topbar .title{font-weight:800}
+  .pill{display:inline-flex;gap:6px;align-items:center;padding:6px 10px;border-radius:999px;background:#eef2ff;color:#1e40af;font-size:12px}
+  dialog{width:min(760px,95vw);border:none;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.25);padding:0}
+  dialog::backdrop{background:rgba(0,0,0,.35)}
+  .dlgHeader{padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center}
+  .dlgBody{padding:14px 16px}
+  .dlgFooter{padding:14px 16px;border-top:1px solid #e5e7eb;display:flex;gap:10px;flex-wrap:wrap}
+  .dangerText{color:#b91c1c;font-weight:800}
+  .kpi{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+  .kpi > div{background:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;padding:10px 12px;font-size:12px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="topbar">
+    <div class="title">📸 経費登録（30秒）</div>
+    <div class="row" style="flex:0 0 auto; gap:8px">
+      <button id="openSettings" class="ghost" style="width:auto;padding:10px 12px">⚙️ 設定</button>
+    </div>
+  </div>
+  <div class="small" id="modeHint"></div>
+
+  <label>レシート画像</label>
+  <input type="file" accept="image/*">
+  <div class="small">※画像はこのツールには保存されません（Drive / OneDrive に保管し、リンクを貼ってください）</div>
+
+  <label>保存先リンク（Google Drive / OneDrive）</label>
+  <input id="link" placeholder="https://drive.google.com/...">
+  <div class="small">※NAS保存は非対応（NAS希望の場合は当ツール対象外）</div>
+
+  <label>用途</label>
+  <select id="purpose">
+    <option value="">選択してください</option>
+    <option value="traffic">交通費</option>
+    <option value="stay">宿泊費</option>
+    <option value="supplies">消耗品</option>
+    <option value="meeting">会議費</option>
+    <option value="entertainment">交際費</option>
+  </select>
+
+  <div id="stayFields" class="hidden">
+    <label>泊数</label>
+    <input id="nights" type="number" value="1" min="1">
+  </div>
+
+  <label>日付</label>
+  <input id="date" type="date">
+
+  <label>金額（円）</label>
+  <input id="amount" type="number" placeholder="AI ONなら空でもOK（将来：自動抽出）">
+
+  <div id="approvalFields" class="hidden">
+    <label>
+      <input type="checkbox" id="approved" style="width:auto;transform:scale(1.2);margin-right:8px">
+      上長（社長）事前承認あり
+    </label>
+    <div class="small">※会議費/交際費（＋必要なら宿泊費）は事前承認の有無で判定が変わります</div>
+  </div>
+
+  <label>メモ（任意）</label>
+  <input id="memo" placeholder="例：◯◯社打合せ / ◯◯現場">
+
+  <button class="primary" id="saveBtn">保存して判定</button>
+</div>
+
+<div id="result" class="card hidden"></div>
+
+<!-- Passcode dialog -->
+<dialog id="passDlg">
+  <div class="dlgHeader">
+    <div style="font-weight:900">🔒 管理者認証</div>
+    <button class="ghost" id="closePassDlg" style="width:auto;padding:8px 10px">閉じる</button>
+  </div>
+  <div class="dlgBody">
+    <div class="pill">設定画面は管理者のみ</div>
+
+    <div id="firstSetupBlock" class="hidden">
+      <label>初回設定：管理者パスコード</label>
+      <input id="newPass1" type="password" placeholder="例：4〜12桁（数字推奨）">
+      <label>確認</label>
+      <input id="newPass2" type="password" placeholder="同じパスコードをもう一度">
+      <div class="small">※このパスコードはこのPCにのみ保存されます。忘れると設定変更ができません。</div>
+      <button class="primary" id="setPassBtn">パスコードを設定</button>
+    </div>
+
+    <div id="loginBlock" class="hidden">
+      <label>パスコード</label>
+      <input id="passInput" type="password" placeholder="管理者パスコードを入力">
+      <button class="primary" id="unlockBtn">認証して設定を開く</button>
+      <div class="small">※パスコードはこのPC内（ローカル）で照合します。</div>
+    </div>
+
+    <div id="passMsg" class="small"></div>
+  </div>
+</dialog>
+
+<!-- Settings dialog -->
+<dialog id="settingsDlg">
+  <div class="dlgHeader">
+    <div style="font-weight:900">⚙️ 社内規定 設定</div>
+    <button class="ghost" id="closeSettings" style="width:auto;padding:8px 10px">閉じる</button>
+  </div>
+
+  <div class="dlgBody">
+    <div class="pill">社長/事務長向け：ここで社内ルールを入力</div>
+
+    <div class="kpi">
+      <div>保存方式：<b>このPCローカル</b></div>
+      <div>管理：<b>パスコード認証</b></div>
+      <div>NAS：<b class="dangerText">非対応</b></div>
+    </div>
+
+    <label>宿泊費 上限（1泊あたり・円）</label>
+    <input id="setStayLimit" type="number" min="0" placeholder="例：10000">
+
+    <label>宿泊費が上限超過した場合の扱い</label>
+    <select id="setStayOverAction">
+      <option value="warn">🟡 要確認</option>
+      <option value="danger">🔴 要対応</option>
+    </select>
+
+    <label>
+      <input id="setStayApprovalRequired" type="checkbox" style="width:auto;transform:scale(1.2);margin-right:8px">
+      宿泊費は事前承認を必須にする
+    </label>
+
+    <label>
+      <input id="setStayApprovedDowngrade" type="checkbox" style="width:auto;transform:scale(1.2);margin-right:8px">
+      宿泊費：上限超過でも「事前承認あり」なら🟡にする
+    </label>
+
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+
+    <label>
+      <input id="setMeetingApprovalRequired" type="checkbox" style="width:auto;transform:scale(1.2);margin-right:8px">
+      会議費は事前承認を必須にする
+    </label>
+
+    <label>
+      <input id="setEntertainmentApprovalRequired" type="checkbox" style="width:auto;transform:scale(1.2);margin-right:8px">
+      交際費は事前承認を必須にする
+    </label>
+
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+
+    <label>AIモード（MVP：ON/OFFのみ。呼び出しは後で差し替え）</label>
+    <select id="setAiMode">
+      <option value="off">AI OFF（手入力中心）</option>
+      <option value="on">AI ON（将来：自動抽出/一次チェック）</option>
+    </select>
+
+    <label>月間AI利用上限（回）</label>
+    <input id="setAiMonthlyLimit" type="number" min="0" placeholder="例：200">
+
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+
+    <h1 style="font-size:16px;margin:0 0 6px">🧰 設定のバックアップ</h1>
+    <div class="small">このPCの設定をJSONとして保存/復元できます（PC故障・ブラウザ初期化対策）。</div>
+
+    <div class="row" style="margin-top:8px">
+      <button class="ghost" id="exportSettingsBtn">⬇️ エクスポート（JSON保存）</button>
+      <button class="ghost" id="showImportAreaBtn">⬆️ インポート（JSON読み込み）</button>
+    </div>
+
+    <div id="importArea" class="hidden" style="margin-top:10px">
+      <label>JSONを貼り付け</label>
+      <textarea id="importJson" class="mono" placeholder='{"stayLimit":10000,...}'></textarea>
+      <div class="row">
+        <button class="primary" id="importFromTextBtn">このJSONで復元</button>
+        <button class="ghost" id="hideImportAreaBtn">閉じる</button>
+      </div>
+
+      <label>JSONファイルから読み込み</label>
+      <input id="importFile" type="file" accept="application/json">
+      <div class="small">※会社内共有するなら、ここでファイルを受け取って読み込むのが一番簡単です。</div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">
+
+    <h1 style="font-size:16px;margin:0 0 6px">🔑 管理者パスコード</h1>
+    <div class="row">
+      <button class="ghost" id="changePassBtn">パスコード変更</button>
+      <button class="ghost" id="clearPassBtn" title="最後の手段（設定が触れなくなります）">パスコード削除</button>
+    </div>
+    <div class="small dangerText">※削除すると次回「初回設定」からやり直しになります。慎重に。</div>
+
+    <div class="small">
+      ※本ツールは社内規定に基づく事前チェックです。税務上の最終判断は顧問税理士にご確認ください。<br>
+      ※NAS保管は非対応（NAS希望の場合は当ツール対象外）。<br>
+    </div>
+
+    <div id="settingsMsg" class="small"></div>
+  </div>
+
+  <div class="dlgFooter">
+    <button class="primary" id="saveSettings">設定を保存</button>
+    <button class="ghost" id="resetSettings">初期値に戻す</button>
+  </div>
+</dialog>
+
+<!-- Change pass dialog -->
+<dialog id="changePassDlg">
+  <div class="dlgHeader">
+    <div style="font-weight:900">🔑 パスコード変更</div>
+    <button class="ghost" id="closeChangePassDlg" style="width:auto;padding:8px 10px">閉じる</button>
+  </div>
+  <div class="dlgBody">
+    <label>現在のパスコード</label>
+    <input id="curPass" type="password" placeholder="現在のパスコード">
+
+    <label>新しいパスコード</label>
+    <input id="chgPass1" type="password" placeholder="4〜12桁（数字推奨）">
+
+    <label>確認</label>
+    <input id="chgPass2" type="password" placeholder="同じパスコードをもう一度">
+
+    <button class="primary" id="applyPassChangeBtn">変更する</button>
+    <div id="chgMsg" class="small"></div>
+  </div>
+</dialog>
+
+<script>
+/** ========= Storage keys ========= */
+const LS_SETTINGS = "nc_expense_settings_v2";
+const LS_PASS_HASH = "nc_admin_pass_hash_v1";
+const LS_UNLOCKED = "nc_admin_unlocked_v1"; // session
+
+/** ========= Defaults ========= */
+const DEFAULT_SETTINGS = {
+  stayLimit: 10000,
+  stayOverAction: "warn",             // warn | danger
+  stayApprovalRequired: false,
+  stayApprovedDowngrade: true,
+  meetingApprovalRequired: true,
+  entertainmentApprovalRequired: true,
+  aiMode: "off",                      // off | on (placeholder)
+  aiMonthlyLimit: 200
+};
+
+/** ========= Helpers ========= */
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem(LS_SETTINGS);
+    if(!raw) return {...DEFAULT_SETTINGS};
+    const s = JSON.parse(raw);
+    return {...DEFAULT_SETTINGS, ...s};
+  }catch{
+    return {...DEFAULT_SETTINGS};
+  }
+}
+function storeSettings(s){
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(s));
+}
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+function downloadText(filename, text){
+  const blob = new Blob([text], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+
+/** ========= Passcode hashing (lightweight) =========
+ * 目的：平文をlocalStorageに置かないための最低限。
+ * ※本格的セキュリティが必要ならサーバ方式へ。
+ */
+async function sha256Hex(str){
+  const enc = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest("SHA-256", enc);
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+async function hasPasscode(){
+  return !!localStorage.getItem(LS_PASS_HASH);
+}
+function isUnlocked(){
+  return sessionStorage.getItem(LS_UNLOCKED) === "1";
+}
+function setUnlocked(v){
+  sessionStorage.setItem(LS_UNLOCKED, v ? "1" : "0");
+}
+
+/** ========= Relax tips ========= */
+const relaxTips = [
+  "🌬 深呼吸を3回。鼻から吸って、口からゆっくり",
+  "💧 水を一口飲んで、肩の力を抜こう",
+  "👀 目を閉じて10秒。画面から目を離そう",
+  "🙆‍♂️ 大きく背伸びしてみよう",
+  "🌀 首や肩をゆっくり回してみよう",
+  "🚶 外の空気を吸いに行こう",
+  "🪟 窓の外を10秒眺めてみよう"
+];
+function pickRelax(){
+  return relaxTips[Math.floor(Math.random()*relaxTips.length)];
+}
+
+/** ========= Main UI wiring ========= */
+let settings = loadSettings();
+
+const purposeEl = document.getElementById("purpose");
+const stayFields = document.getElementById("stayFields");
+const approvalFields = document.getElementById("approvalFields");
+const amountEl = document.getElementById("amount");
+const nightsEl = document.getElementById("nights");
+const approvedEl = document.getElementById("approved");
+const linkEl = document.getElementById("link");
+const dateEl = document.getElementById("date");
+const modeHint = document.getElementById("modeHint");
+
+function updateModeHint(){
+  const ai = settings.aiMode === "on";
+  modeHint.textContent = ai
+    ? "🧠 現在：AI ON（将来ここに自動抽出を追加）"
+    : "✍️ 現在：AI OFF（手入力中心）";
+  amountEl.placeholder = ai ? "AI ONなら空でもOK（将来：自動抽出）" : "手入力してください";
+}
+updateModeHint();
+
+// default date = today
+(function initDate(){
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,"0");
+  const day = String(d.getDate()).padStart(2,"0");
+  dateEl.value = `${y}-${m}-${day}`;
+})();
+
+purposeEl.onchange = () => {
+  const v = purposeEl.value;
+  stayFields.classList.toggle("hidden", v !== "stay");
+  const showApproval = ["meeting","entertainment","stay"].includes(v);
+  approvalFields.classList.toggle("hidden", !showApproval);
+};
+
+function badge(status){
+  if(status==="ok") return `<span class="badge ok">🟢 問題なし</span>`;
+  if(status==="warn") return `<span class="badge warn">🟡 要確認</span>`;
+  return `<span class="badge danger">🔴 要対応</span>`;
+}
+
+function evaluate(){
+  const purpose = purposeEl.value;
+  const amount = Number(amountEl.value || 0);
+  const nights = Math.max(1, Number(nightsEl.value || 1));
+  const approved = !!approvedEl.checked;
+
+  let status = "ok";
+  let reasons = [];
+
+  // Approval requirements
+  if(purpose === "meeting" && settings.meetingApprovalRequired && !approved){
+    status = "danger";
+    reasons.push("会議費：事前承認がありません");
+  }
+  if(purpose === "entertainment" && settings.entertainmentApprovalRequired && !approved){
+    status = "danger";
+    reasons.push("交際費：事前承認がありません");
+  }
+  if(purpose === "stay" && settings.stayApprovalRequired && !approved){
+    status = "danger";
+    reasons.push("宿泊費：事前承認がありません");
+  }
+
+  // Stay limit check
+  if(purpose === "stay" && amount > 0){
+    const perNight = amount / nights;
+    if(perNight > settings.stayLimit){
+      let act = settings.stayOverAction; // warn|danger
+      if(approved && settings.stayApprovedDowngrade) act = "warn";
+      if(status !== "danger") status = act;
+      reasons.push(`宿泊費：${Math.round(perNight)}円/泊（上限${settings.stayLimit}円超）`);
+    }
+  }
+
+  // Date age hint
+  const d = new Date(dateEl.value);
+  if(!isNaN(d.getTime())){
+    const days = Math.floor((Date.now() - d.getTime()) / (1000*60*60*24));
+    if(days > 90){
+      status = "danger";
+      reasons.push("日付：3か月以上前（要対応）");
+    }else if(days > 60 && status === "ok"){
+      status = "warn";
+      reasons.push("日付：2か月以上前（要確認）");
+    }
+  }
+
+  // Amount required if AI OFF
+  if(settings.aiMode !== "on" && !amount){
+    status = "danger";
+    reasons.push("金額が未入力です（AI OFFでは必須）");
+  }
+
+  return {status, reasons};
+}
+
+document.getElementById("saveBtn").onclick = () => {
+  const link = linkEl.value.trim();
+  if(!link){ alert("保存先リンクは必須です"); return; }
+  if(!purposeEl.value){ alert("用途を選択してください"); return; }
+
+  const {status, reasons} = evaluate();
+  const relax = pickRelax();
+
+  const r = document.getElementById("result");
+  r.classList.remove("hidden");
+  r.innerHTML = `
+    <h1>判定結果</h1>
+    ${badge(status)}
+    ${reasons.length ? `<ul>${reasons.map(x=>`<li>${escapeHtml(x)}</li>`).join("")}</ul>` : `<div class="small">（特に指摘なし）</div>`}
+    <div class="relax">
+      🫶 <strong>30秒おすすめリラックス</strong><br>
+      今日のヒント： ${escapeHtml(relax)}
+    </div>
+  `;
+};
+
+/** ========= Settings UI ========= */
+const settingsDlg = document.getElementById("settingsDlg");
+const passDlg = document.getElementById("passDlg");
+const changePassDlg = document.getElementById("changePassDlg");
+
+function fillSettingsUI(s){
+  document.getElementById("setStayLimit").value = s.stayLimit;
+  document.getElementById("setStayOverAction").value = s.stayOverAction;
+  document.getElementById("setStayApprovalRequired").checked = !!s.stayApprovalRequired;
+  document.getElementById("setStayApprovedDowngrade").checked = !!s.stayApprovedDowngrade;
+  document.getElementById("setMeetingApprovalRequired").checked = !!s.meetingApprovalRequired;
+  document.getElementById("setEntertainmentApprovalRequired").checked = !!s.entertainmentApprovalRequired;
+  document.getElementById("setAiMode").value = s.aiMode;
+  document.getElementById("setAiMonthlyLimit").value = s.aiMonthlyLimit;
+  document.getElementById("settingsMsg").textContent = "";
+}
+
+function collectSettingsUI(){
+  const stayLimit = Number(document.getElementById("setStayLimit").value || 0);
+  if(stayLimit < 0) throw new Error("宿泊費上限は0以上で入力してください");
+
+  return {
+    stayLimit: stayLimit || DEFAULT_SETTINGS.stayLimit,
+    stayOverAction: document.getElementById("setStayOverAction").value,
+    stayApprovalRequired: document.getElementById("setStayApprovalRequired").checked,
+    stayApprovedDowngrade: document.getElementById("setStayApprovedDowngrade").checked,
+    meetingApprovalRequired: document.getElementById("setMeetingApprovalRequired").checked,
+    entertainmentApprovalRequired: document.getElementById("setEntertainmentApprovalRequired").checked,
+    aiMode: document.getElementById("setAiMode").value,
+    aiMonthlyLimit: Number(document.getElementById("setAiMonthlyLimit").value || DEFAULT_SETTINGS.aiMonthlyLimit)
+  };
+}
+
+/** ========= Passcode flow ========= */
+document.getElementById("openSettings").onclick = async () => {
+  if(isUnlocked()){
+    // already unlocked in this session
+    fillSettingsUI(loadSettings());
+    settingsDlg.showModal();
+    return;
+  }
+
+  // show pass dialog (first setup or login)
+  const has = await hasPasscode();
+  document.getElementById("firstSetupBlock").classList.toggle("hidden", has);
+  document.getElementById("loginBlock").classList.toggle("hidden", !has);
+  document.getElementById("passMsg").textContent = "";
+  passDlg.showModal();
+};
+
+document.getElementById("closePassDlg").onclick = () => passDlg.close();
+
+document.getElementById("setPassBtn").onclick = async () => {
+  const p1 = (document.getElementById("newPass1").value || "").trim();
+  const p2 = (document.getElementById("newPass2").value || "").trim();
+  const msg = document.getElementById("passMsg");
+  msg.textContent = "";
+
+  if(p1.length < 4 || p1.length > 12){
+    msg.textContent = "パスコードは4〜12文字で設定してください。";
+    return;
+  }
+  if(p1 !== p2){
+    msg.textContent = "確認用パスコードが一致しません。";
+    return;
+  }
+  const h = await sha256Hex(p1);
+  localStorage.setItem(LS_PASS_HASH, h);
+  setUnlocked(true);
+  msg.textContent = "✅ パスコードを設定しました。設定画面を開きます。";
+
+  // open settings
+  passDlg.close();
+  fillSettingsUI(loadSettings());
+  settingsDlg.showModal();
+};
+
+document.getElementById("unlockBtn").onclick = async () => {
+  const input = (document.getElementById("passInput").value || "").trim();
+  const msg = document.getElementById("passMsg");
+  msg.textContent = "";
+
+  const saved = localStorage.getItem(LS_PASS_HASH);
+  if(!saved){
+    msg.textContent = "パスコードが未設定です。";
+    return;
+  }
+  const h = await sha256Hex(input);
+  if(h !== saved){
+    msg.textContent = "パスコードが違います。";
+    return;
+  }
+  setUnlocked(true);
+  passDlg.close();
+  fillSettingsUI(loadSettings());
+  settingsDlg.showModal();
+};
+
+/** ========= Settings dialog buttons ========= */
+document.getElementById("closeSettings").onclick = () => settingsDlg.close();
+
+document.getElementById("saveSettings").onclick = () => {
+  try{
+    const s = collectSettingsUI();
+    storeSettings(s);
+    settings = loadSettings();
+    updateModeHint();
+    document.getElementById("settingsMsg").textContent = "✅ 保存しました（このPCのブラウザに保存）";
+  }catch(e){
+    alert(e.message);
+  }
+};
+
+document.getElementById("resetSettings").onclick = () => {
+  storeSettings({...DEFAULT_SETTINGS});
+  settings = loadSettings();
+  fillSettingsUI(settings);
+  updateModeHint();
+  document.getElementById("settingsMsg").textContent = "↩ 初期値に戻しました";
+};
+
+/** ========= Export / Import ========= */
+document.getElementById("exportSettingsBtn").onclick = () => {
+  const s = loadSettings();
+  const stamp = new Date().toISOString().slice(0,10);
+  downloadText(`expense-settings-${stamp}.json`, JSON.stringify(s, null, 2));
+  document.getElementById("settingsMsg").textContent = "⬇️ 設定JSONを保存しました。";
+};
+
+document.getElementById("showImportAreaBtn").onclick = () => {
+  document.getElementById("importArea").classList.remove("hidden");
+};
+document.getElementById("hideImportAreaBtn").onclick = () => {
+  document.getElementById("importArea").classList.add("hidden");
+};
+
+document.getElementById("importFromTextBtn").onclick = () => {
+  try{
+    const txt = document.getElementById("importJson").value.trim();
+    if(!txt) { alert("JSONを貼り付けてください"); return; }
+    const obj = JSON.parse(txt);
+    // Merge with defaults to avoid missing keys
+    const merged = {...DEFAULT_SETTINGS, ...obj};
+    storeSettings(merged);
+    settings = loadSettings();
+    fillSettingsUI(settings);
+    updateModeHint();
+    document.getElementById("settingsMsg").textContent = "✅ インポートして復元しました。";
+  }catch(e){
+    alert("JSONの形式が正しくありません：\n" + e.message);
+  }
+};
+
+document.getElementById("importFile").addEventListener("change", async (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if(!f) return;
+  try{
+    const txt = await f.text();
+    const obj = JSON.parse(txt);
+    const merged = {...DEFAULT_SETTINGS, ...obj};
+    storeSettings(merged);
+    settings = loadSettings();
+    fillSettingsUI(settings);
+    updateModeHint();
+    document.getElementById("settingsMsg").textContent = "✅ JSONファイルから復元しました。";
+    ev.target.value = "";
+  }catch(e){
+    alert("読み込みに失敗しました：\n" + e.message);
+  }
+});
+
+/** ========= Passcode change / clear ========= */
+document.getElementById("changePassBtn").onclick = () => {
+  document.getElementById("curPass").value = "";
+  document.getElementById("chgPass1").value = "";
+  document.getElementById("chgPass2").value = "";
+  document.getElementById("chgMsg").textContent = "";
+  changePassDlg.showModal();
+};
+document.getElementById("closeChangePassDlg").onclick = () => changePassDlg.close();
+
+document.getElementById("applyPassChangeBtn").onclick = async () => {
+  const cur = (document.getElementById("curPass").value || "").trim();
+  const p1 = (document.getElementById("chgPass1").value || "").trim();
+  const p2 = (document.getElementById("chgPass2").value || "").trim();
+  const msg = document.getElementById("chgMsg");
+  msg.textContent = "";
+
+  const saved = localStorage.getItem(LS_PASS_HASH);
+  if(!saved){ msg.textContent = "パスコードが未設定です。"; return; }
+
+  const curH = await sha256Hex(cur);
+  if(curH !== saved){ msg.textContent = "現在のパスコードが違います。"; return; }
+
+  if(p1.length < 4 || p1.length > 12){
+    msg.textContent = "新しいパスコードは4〜12文字で設定してください。";
+    return;
+  }
+  if(p1 !== p2){
+    msg.textContent = "確認用パスコードが一致しません。";
+    return;
+  }
+  const newH = await sha256Hex(p1);
+  localStorage.setItem(LS_PASS_HASH, newH);
+  msg.textContent = "✅ パスコードを変更しました。";
+};
+
+document.getElementById("clearPassBtn").onclick = () => {
+  const ok = confirm("パスコードを削除しますか？\n次回以降、設定変更には再度パスコード設定が必要になります。");
+  if(!ok) return;
+  localStorage.removeItem(LS_PASS_HASH);
+  setUnlocked(false);
+  alert("パスコードを削除しました。次回は初回設定からになります。");
+};
+</script>
+</body>
+</html>
